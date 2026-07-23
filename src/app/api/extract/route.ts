@@ -4,9 +4,8 @@ dns.setDefaultResultOrder('ipv4first');
 import * as cheerio from 'cheerio';
 import { neon } from '@neondatabase/serverless';
 import { getDb, insertArticle } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
+import { put } from '@vercel/blob';
 
 async function downloadImage(url: string, prefix: string): Promise<string> {
   if (!url) return "";
@@ -22,19 +21,17 @@ async function downloadImage(url: string, prefix: string): Promise<string> {
     if (!res.ok) return "";
     
     const buffer = await res.arrayBuffer();
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
     
     const ext = url.includes('webp') ? '.webp' : '.jpg';
-    const filename = `${prefix}_${crypto.randomBytes(4).toString('hex')}${ext}`;
-    fs.writeFileSync(path.join(uploadsDir, filename), Buffer.from(buffer));
+    const filename = `jornal-tech/${prefix}_${crypto.randomBytes(4).toString('hex')}${ext}`;
     
-    return `/uploads/${filename}`;
+    const blob = await put(filename, Buffer.from(buffer), {
+      access: 'public',
+    });
+    
+    return blob.url;
   } catch (e) {
-    console.error("Error downloading image:", e);
+    console.error("Error uploading image to Vercel Blob:", e);
     return "";
   }
 }
