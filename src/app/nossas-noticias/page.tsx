@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 export default async function NossasNoticias({
   searchParams,
 }: {
@@ -14,10 +16,8 @@ export default async function NossasNoticias({
   const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
   const ITEMS_PER_PAGE = 12;
 
-  // Ordenar da mais recente para a mais antiga
-  const articles = [...db.articles].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  // db.articles já vem ordenado pela SQL
+  const articles = db.articles;
 
   const totalArticles = articles.length;
   const totalPages = Math.ceil(totalArticles / ITEMS_PER_PAGE) || 1;
@@ -38,31 +38,49 @@ export default async function NossasNoticias({
         </h1>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-xl)', width: '100%', maxWidth: '1200px', margin: '0 auto' }}>
-          {currentArticles.length > 0 ? currentArticles.map((article) => (
-            <article key={article.id} className="card" style={{ display: 'flex', flexDirection: 'column', background: 'var(--color-paper)', color: 'var(--color-ink)' }}>
-              {article.coverImage && (
-                <div style={{ width: '100%', height: '180px', overflow: 'hidden', borderRadius: '4px', marginBottom: 'var(--space-md)' }}>
-                  <img src={article.coverImage} alt={article.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          {currentArticles.length > 0 ? currentArticles.map((article) => {
+            const dateObj = article.recycled_at || article.extracted_at;
+            const displayDate = dateObj ? new Date(dateObj).toLocaleDateString('pt-BR') : 'Hoje';
+
+            return (
+              <article key={article.id} className="card" style={{ display: 'flex', flexDirection: 'column', background: 'var(--color-paper)', color: 'var(--color-ink)' }}>
+                {article.coverImage && (
+                  <div style={{ width: '100%', height: '180px', overflow: 'hidden', borderRadius: '4px', marginBottom: 'var(--space-md)' }}>
+                    <img src={article.coverImage} alt={article.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                )}
+                <div className="font-label text-xs color-ink-2" style={{ marginBottom: 'var(--space-xs)' }}>
+                  {displayDate}
                 </div>
-              )}
-              <div className="font-label text-xs color-ink-2" style={{ marginBottom: 'var(--space-xs)' }}>
-                {new Date(article.createdAt).toLocaleDateString('pt-BR')}
-              </div>
-              <h3 className="font-display" style={{ fontSize: '1.25rem', lineHeight: 1.3, marginBottom: 'var(--space-md)', flexGrow: 1 }}>{article.title}</h3>
-              <div style={{ borderTop: '1px solid var(--color-rule)', paddingTop: 'var(--space-xs)', marginTop: 'auto' }}>
-                <Link href={`/noticia/${article.id}`} className="font-label text-xs color-accent" style={{ textDecoration: 'none' }}>
-                  LER COMPLETO →
-                </Link>
-              </div>
-            </article>
-          )) : (
+                <h3 className="font-display" style={{ fontSize: '1.25rem', lineHeight: 1.3, marginBottom: 'var(--space-md)', flexGrow: 1 }}>{article.title}</h3>
+                <div style={{ borderTop: '1px solid var(--color-rule)', paddingTop: 'var(--space-xs)', marginTop: 'auto' }}>
+                  <Link href={`/noticia/${article.id}`} className="font-label text-xs color-accent" style={{ textDecoration: 'none' }}>
+                    LER COMPLETO →
+                  </Link>
+                </div>
+              </article>
+            );
+          }) : (
             <div style={{ color: 'var(--color-ink-2)', gridColumn: '1 / -1', textAlign: 'center' }}>Nenhuma notícia encontrada.</div>
           )}
         </div>
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-3xl)', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-3xl)', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+            
+            {/* PRIMEIRA */}
+            {safePage > 1 ? (
+              <Link href={`/nossas-noticias?page=1`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
+                {'<<'} PRIMEIRA
+              </Link>
+            ) : (
+              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
+                {'<<'} PRIMEIRA
+              </span>
+            )}
+
+            {/* ANTERIOR */}
             {safePage > 1 ? (
               <Link href={`/nossas-noticias?page=${safePage - 1}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
                 ← ANTERIOR
@@ -73,10 +91,22 @@ export default async function NossasNoticias({
               </span>
             )}
 
-            <span className="font-label text-sm">
-              PÁGINA {safePage} DE {totalPages}
-            </span>
+            {/* FORM DE NÚMERO */}
+            <form action="/nossas-noticias" method="GET" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', margin: '0 var(--space-sm)' }}>
+              <span className="font-label text-sm">PÁGINA</span>
+              <input 
+                type="number" 
+                name="page" 
+                defaultValue={safePage} 
+                min={1} 
+                max={totalPages} 
+                style={{ width: '60px', padding: 'var(--space-xs)', background: 'var(--color-bg)', color: 'var(--color-ink)', border: '1px solid var(--color-rule)', textAlign: 'center', fontFamily: 'var(--font-mono)' }} 
+              />
+              <span className="font-label text-sm">DE {totalPages}</span>
+              <button type="submit" style={{ display: 'none' }}>Ir</button>
+            </form>
 
+            {/* PRÓXIMA */}
             {safePage < totalPages ? (
               <Link href={`/nossas-noticias?page=${safePage + 1}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
                 PRÓXIMA →
@@ -86,6 +116,18 @@ export default async function NossasNoticias({
                 PRÓXIMA →
               </span>
             )}
+
+            {/* ÚLTIMA */}
+            {safePage < totalPages ? (
+              <Link href={`/nossas-noticias?page=${totalPages}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
+                ÚLTIMA {'>>'}
+              </Link>
+            ) : (
+              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
+                ÚLTIMA {'>>'}
+              </span>
+            )}
+
           </div>
         )}
       </section>

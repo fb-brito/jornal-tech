@@ -3,7 +3,7 @@ import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 import * as cheerio from 'cheerio';
 import { neon } from '@neondatabase/serverless';
-import { getDb, insertArticle } from '@/lib/db';
+import { getSql, insertArticle, logError } from '@/lib/db';
 import crypto from 'crypto';
 import { put } from '@vercel/blob';
 
@@ -18,7 +18,10 @@ async function downloadImage(url: string, prefix: string): Promise<string> {
         'Referer': 'https://www.xiaohongshu.com/'
       }
     });
-    if (!res.ok) return "";
+    if (!res.ok) {
+      await logError(url, "Download Image Status", `HTTP ${res.status}`);
+      return "";
+    }
     
     const buffer = await res.arrayBuffer();
     
@@ -30,20 +33,39 @@ async function downloadImage(url: string, prefix: string): Promise<string> {
     });
     
     return blob.url;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error uploading image to Vercel Blob:", e);
+    await logError(url, "Download Image Exception", e.message);
     return "";
   }
 }
 
 export async function POST(req: Request) {
+  let requestUrl = "";
   try {
     const { url } = await req.json();
+    requestUrl = url;
 
     if (!url) {
       return NextResponse.json({ error: 'URL é obrigatória' }, { status: 400 });
     }
 
+    // EXTRAÇÃO DA CHAVE NATURAL (ID) DA URL
+    let id = Date.now().toString();
+    const match = url.match(/\/o\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      id = match[1];
+    } else {
+      try {
+        const parts = new URL(url).pathname.split('/').filter(Boolean);
+        const lastPart = parts[parts.length - 1];
+        if (lastPart && lastPart.length > 5) {
+          id = lastPart;
+        }
+      } catch(e) { }
+    }
+
+    // TRAVA DO ROOM
     if (process.env.ROOM_DATABASE_URL) {
       try {
         const roomSql = neon(process.env.ROOM_DATABASE_URL);
@@ -58,13 +80,27 @@ export async function POST(req: Request) {
       }
     }
 
-    const db = await getDb();
-    const existingArticle = db.articles.find(a => a.url === url);
-    if (existingArticle) {
-      return NextResponse.json({ 
-        error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
-        existingId: existingArticle.id 
-      }, { status: 409 });
+    // VERIFICAÇÃO DE DUPLICATA E RECICLAGEM
+    const sql = getSql();
+    try {
+      const existing = await sql`SELECT status FROM articles WHERE id = ${id}`;
+      if (existing.length > 0) {
+        if (existing[0].status === 'deleted') {
+           await sql`
+             UPDATE articles 
+             SET status = 'active', recycled_at = NOW(), recycle_count = recycle_count + 1 
+             WHERE id = ${id}
+           `;
+           return NextResponse.json({ success: true, id, recycled: true, message: 'Matéria recuperada da lixeira com sucesso!' });
+        } else {
+           return NextResponse.json({ 
+             error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
+             existingId: id 
+           }, { status: 409 });
+        }
+      }
+    } catch(dbErr) {
+       console.error("Falha ao consultar banco. Continuando fluxo de inserção otimista...", dbErr);
     }
 
     const response = await fetch(url, {
@@ -74,6 +110,7 @@ export async function POST(req: Request) {
     });
 
     if (!response.ok) {
+      await logError(url, "Scraping Status", `HTTP ${response.status}`);
       return NextResponse.json({ error: 'Falha ao acessar a URL' }, { status: response.status });
     }
 
@@ -83,7 +120,9 @@ export async function POST(req: Request) {
     let desc = "";
     let coverImage = "";
     let images: string[] = [];
-    const id = Date.now().toString();
+    let published_at: string | null = null;
+    let modified_at: string | null = null;
+    let source_metadata: string | null = null;
 
     if (stateMatch) {
       let stateStr = stateMatch[1];
@@ -93,36 +132,47 @@ export async function POST(req: Request) {
         const noteId = state?.note?.firstNoteId;
         if (noteId) {
           const noteDetail = state.note.noteDetailMap[noteId]?.note;
-          title = noteDetail?.title || "";
-          desc = noteDetail?.desc || "";
-          const type = noteDetail?.type;
+          if (noteDetail) {
+             title = noteDetail.title || "";
+             desc = noteDetail.desc || "";
+             const type = noteDetail.type;
+             
+             if (noteDetail.time) published_at = new Date(noteDetail.time).toISOString();
+             if (noteDetail.lastUpdateTime) modified_at = new Date(noteDetail.lastUpdateTime).toISOString();
+             source_metadata = JSON.stringify(noteDetail);
 
-          if (noteDetail?.imageList && noteDetail.imageList.length > 0) {
-            if (type === 'video') {
-              // Video: Download só a primeira imagem em alta resolução
-              let rawUrl = noteDetail.imageList[0]?.urlDefault || "";
-              if (rawUrl) {
-                const localPath = await downloadImage(rawUrl, id);
-                if (localPath) images.push(localPath);
-              }
-            } else {
-              // Normal (Imagens): Baixar TODAS as imagens
-              for (const img of noteDetail.imageList) {
-                let rawUrl = img.urlOriginal || img.urlDefault || "";
-                if (rawUrl) {
-                  const localPath = await downloadImage(rawUrl, id);
-                  if (localPath) images.push(localPath);
-                }
-              }
-            }
+             if (noteDetail.imageList && noteDetail.imageList.length > 0) {
+               if (type === 'video') {
+                 let rawUrl = noteDetail.imageList[0]?.urlDefault || "";
+                 if (rawUrl) {
+                   const localPath = await downloadImage(rawUrl, id);
+                   if (localPath) images.push(localPath);
+                 }
+               } else {
+                 for (const img of noteDetail.imageList) {
+                   let rawUrl = img.urlOriginal || img.urlDefault || "";
+                   if (rawUrl) {
+                     const localPath = await downloadImage(rawUrl, id);
+                     if (localPath) images.push(localPath);
+                   }
+                 }
+               }
+             }
+             if (images.length > 0) {
+               coverImage = images[0];
+             } else {
+                await logError(url, "Scraping Parsing", "Zero imagens extraídas da lista (talvez bloqueio do site)");
+             }
           }
-          if (images.length > 0) {
-            coverImage = images[0];
-          }
+        } else {
+          await logError(url, "Scraping Parsing", "noteId não encontrado no __INITIAL_STATE__");
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("Erro ao fazer parse do estado inicial:", e);
+        await logError(url, "Scraping Parse Exception", e.message);
       }
+    } else {
+       await logError(url, "Scraping Parsing", "__INITIAL_STATE__ não encontrado no HTML (talvez a página tenha mudado de estrutura)");
     }
 
     if (!title && !desc) {
@@ -183,14 +233,18 @@ export async function POST(req: Request) {
           }
         } else {
           console.error(`Erro com o modelo ${model}: ${aiResponse.status}`);
+          const errTxt = await aiResponse.text();
+          await logError(url, `AI Fetch Status (${model})`, `HTTP ${aiResponse.status}`, errTxt);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Falha ao tentar o modelo ${model}:`, error);
+        await logError(url, `AI Fetch Exception (${model})`, error.message);
       }
     }
 
     if (!finalMarkdown) {
        finalMarkdown = `# ${title}\n\n${desc}\n\n*(Nota: Todos os modelos de IA falharam. Conteúdo bruto exibido.)*`;
+       await logError(url, "AI Processing", "Todos os modelos do OpenRouter falharam em retornar markdown.");
     }
 
     let generatedTitle = title;
@@ -216,14 +270,29 @@ export async function POST(req: Request) {
       images,
       markdown: finalMarkdown,
       rawContent,
-      createdAt: new Date().toISOString()
+      status: 'active',
+      source_metadata,
+      published_at,
+      modified_at
     };
 
-    await insertArticle(newArticle);
+    try {
+      await insertArticle(newArticle as any);
+    } catch (dbError: any) {
+      // Inserção otimista: se bater na trava do banco (Chave Primária duplicada em transações paralelas rápidas)
+      if (dbError.message?.includes('duplicate key') || dbError.code === '23505') {
+        return NextResponse.json({ 
+          error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
+          existingId: id 
+        }, { status: 409 });
+      }
+      throw dbError; // Repassa erro inesperado
+    }
 
     return NextResponse.json({ success: true, id });
   } catch (error: any) {
     console.error('Erro geral na rota de extração:', error);
+    await logError(requestUrl || "URL Desconhecida", "Exception Crítica Rota", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

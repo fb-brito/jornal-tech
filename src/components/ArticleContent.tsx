@@ -149,10 +149,34 @@ export default function ArticleContent({ article }: { article: any }) {
       {article.url && (
         <div style={{ marginTop: 'var(--space-3xl)', paddingTop: 'var(--space-xl)', borderTop: '1px solid var(--color-rule)' }}>
           <p className="font-label text-sm">
-            <strong>Fonte:</strong> <a href={article.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>{article.url}</a>
+            <strong>Fonte:</strong> <a href={article.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>RedNote (Xiaohongshu)</a>
           </p>
         </div>
       )}
+
+      <div style={{ marginTop: 'var(--space-xl)', textAlign: 'right' }}>
+        <button 
+          onClick={async () => {
+            if (confirm('Deseja mover esta matéria para a lixeira?')) {
+              const res = await fetch('/api/delete-article', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: article.id })
+              });
+              if (res.ok) {
+                router.push('/nossas-noticias');
+                router.refresh();
+              } else {
+                alert('Falha ao excluir matéria.');
+              }
+            }
+          }}
+          className="font-label text-xs"
+          style={{ background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', padding: 'var(--space-xs) var(--space-sm)', cursor: 'pointer', borderRadius: '4px' }}
+        >
+          🗑️ EXCLUIR
+        </button>
+      </div>
     </article>
   );
 }

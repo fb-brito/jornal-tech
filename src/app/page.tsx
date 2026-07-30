@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 function formatManifestoTitle(title: string) {
   const words = title.split(' ');
   
@@ -30,8 +32,8 @@ function formatManifestoTitle(title: string) {
 export default async function Home() {
   const db = await getDb();
   
-  // As 4 últimas notícias (ordenadas pela mais recente)
-  const articles = [...db.articles].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // As 4 últimas notícias
+  const articles = db.articles;
   
   const highlight = articles[0];
   const recents = articles.slice(1, 4);
