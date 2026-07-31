@@ -68,7 +68,7 @@ export default async function Home() {
         <div className="flex-row gap-lg" style={{ width: '100%', flexWrap: 'wrap', justifyContent: 'center' }}>
           {recents.length > 0 ? recents.map((article) => (
             <article key={article.id} className="card" style={{ flex: '1 1 300px', background: 'var(--color-paper)', color: 'var(--color-ink)' }}>
-              <div className="font-label text-xs color-ink-2" style={{ marginBottom: 'var(--space-xs)' }}>AGORA MESMO</div>
+              <div className="font-label text-xs color-ink-2" style={{ marginBottom: 'var(--space-xs)' }}>{article.published_at ? new Date(article.published_at).toLocaleDateString('pt-BR') : 'AGORA MESMO'}</div>
               <h3 className="font-display text-xl" style={{ marginBottom: 'var(--space-md)' }}>{article.title}</h3>
               <div style={{ borderTop: '1px solid var(--color-rule)', paddingTop: 'var(--space-xs)' }}>
                 <Link href={`/noticia/${article.id}`} className="font-label text-xs color-accent" style={{ textDecoration: 'none' }}>

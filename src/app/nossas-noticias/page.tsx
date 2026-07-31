@@ -39,8 +39,7 @@ export default async function NossasNoticias({
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-xl)', width: '100%', maxWidth: '1200px', margin: '0 auto' }}>
           {currentArticles.length > 0 ? currentArticles.map((article) => {
-            const dateObj = article.recycled_at || article.extracted_at;
-            const displayDate = dateObj ? new Date(dateObj).toLocaleDateString('pt-BR') : 'Hoje';
+            const displayDate = article.published_at ? new Date(article.published_at).toLocaleDateString('pt-BR') : 'Hoje';
 
             return (
               <article key={article.id} className="card" style={{ display: 'flex', flexDirection: 'column', background: 'var(--color-paper)', color: 'var(--color-ink)' }}>

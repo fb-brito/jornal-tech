@@ -181,6 +181,10 @@ export async function POST(req: Request) {
       desc = $('meta[name="description"]').attr('content') || $('p').first().text();
     }
 
+    if (title && (title.includes('小红书') || title.includes('Xiaohongshu')) && !desc) {
+      return NextResponse.json({ error: 'Acesso bloqueado pela rede social (Anti-Bot). Não foi possível extrair a matéria.' }, { status: 403 });
+    }
+
     const rawContent = `Title: ${title}\n\nDescription: ${desc}`;
     const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -214,11 +218,11 @@ export async function POST(req: Request) {
             messages: [
               {
                 role: "system",
-                content: "Você é um Jornalista Tech experiente. Seu objetivo é pegar transcrições, títulos e descrições crus e transformá-los em um artigo jornalístico dinâmico usando Markdown puro. REGRAS OBRIGATÓRIAS:\n1. Escreva a matéria INTEIRAMENTE em Português do Brasil (PT-BR).\n2. NUNCA traduza nomes de projetos, tecnologias, ou marcas (ex: 'OpenCut', 'hallmark', 'GitHub'). Mantenha o nome original e adicione explicações de contexto se necessário.\n3. NÃO use espaços de indentação no início das linhas.\n4. Inclua pelo menos 2 diagramas `mermaid` (ex: flowchart, mindmap, sequenceDiagram) no meio do texto para ilustrar os conceitos abordados."
+                content: "Você é um Tradutor e Formatador Estrito. Seu objetivo é pegar o título e a descrição originais e transformá-los em um artigo formatado em Markdown. REGRAS OBRIGATÓRIAS:\n1. Escreva INTEIRAMENTE em Português do Brasil (PT-BR).\n2. O título que você gerar (linha que começa com #) DEVE ser a tradução fiel do título original, adaptado para o português fluído, sem inventar contexto extra.\n3. NUNCA converse com o usuário. NÃO inclua meta-comentários como 'Aqui está a matéria', 'Como você forneceu um texto curto', etc. Retorne EXCLUSIVAMENTE o conteúdo em Markdown.\n4. Se o texto original for extremamente curto, crie uma matéria curta e direta. NUNCA invente informações não presentes no texto original (ex: não comece a explicar o que é a rede social ou o histórico da empresa se isso não foi fornecido).\n5. NUNCA traduza nomes de projetos, tecnologias, ou marcas (ex: 'OpenCut', 'hallmark', 'GitHub').\n6. Inclua 1 diagrama `mermaid` APENAS se o contexto permitir ilustrar um processo. Se o texto for apenas uma frase de humor ou observação curta, NÃO insira diagrama."
               },
               {
                 role: "user",
-                content: `Baseado no seguinte conteúdo, crie a matéria jornalística formatada em Markdown.\n\nTítulo Original: ${title}\nDescrição: ${desc}\n\nConteúdo Bruto:\n${rawContent}`
+                content: `Traduza e formate o seguinte conteúdo estritamente para Markdown.\n\nTítulo Original: ${title}\nDescrição Original: ${desc}`
               }
             ]
           }),

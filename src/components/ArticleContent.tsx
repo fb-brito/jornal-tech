@@ -70,6 +70,7 @@ const ImageCarousel = ({ images }: { images: string[] }) => {
 
 export default function ArticleContent({ article }: { article: any }) {
   const router = useRouter();
+  const [isModalOpen, setIsModalOpen] = useState(false);
   
   return (
     <article className="container prose" style={{ padding: 'var(--space-3xl) var(--space-md)' }}>
@@ -90,6 +91,12 @@ export default function ArticleContent({ article }: { article: any }) {
           style={{ width: '100%', maxHeight: '50vh', objectFit: 'cover', marginBottom: 'var(--space-2xl)' }}
         />
       ) : null}
+      
+      {article.published_at && (
+        <div style={{ marginBottom: 'var(--space-xl)', color: 'var(--color-text-dim)', fontSize: 'var(--text-sm)', fontWeight: 500, borderBottom: '1px solid var(--color-rule)', paddingBottom: 'var(--space-sm)' }}>
+          Postado em: {new Date(article.published_at).toLocaleDateString('pt-BR')}
+        </div>
+      )}
       
       <ReactMarkdown
         components={{
@@ -156,27 +163,49 @@ export default function ArticleContent({ article }: { article: any }) {
 
       <div style={{ marginTop: 'var(--space-xl)', textAlign: 'right' }}>
         <button 
-          onClick={async () => {
-            if (confirm('Deseja mover esta matéria para a lixeira?')) {
-              const res = await fetch('/api/delete-article', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: article.id })
-              });
-              if (res.ok) {
-                router.push('/nossas-noticias');
-                router.refresh();
-              } else {
-                alert('Falha ao excluir matéria.');
-              }
-            }
-          }}
+          onClick={() => setIsModalOpen(true)}
           className="font-label text-xs"
           style={{ background: 'transparent', border: '1px solid #ff4444', color: '#ff4444', padding: 'var(--space-xs) var(--space-sm)', cursor: 'pointer', borderRadius: '4px' }}
         >
           🗑️ EXCLUIR
         </button>
       </div>
+
+      {isModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--color-surface)', padding: 'var(--space-2xl)', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center', border: '1px solid var(--color-rule)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-md)', fontSize: 'var(--text-lg)', color: 'var(--color-text)' }}>Excluir Matéria</h3>
+            <p style={{ color: 'var(--color-text-dim)', marginBottom: 'var(--space-2xl)' }}>Deseja realmente mover esta matéria para a lixeira?</p>
+            <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center' }}>
+              <button 
+                onClick={() => setIsModalOpen(false)} 
+                style={{ background: 'transparent', border: '1px solid var(--color-rule)', color: 'var(--color-text)', padding: 'var(--space-sm) var(--space-xl)', cursor: 'pointer', borderRadius: '4px', fontWeight: 600 }}
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={async () => {
+                  const res = await fetch('/api/delete-article', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: article.id })
+                  });
+                  if (res.ok) {
+                    router.push('/nossas-noticias');
+                    router.refresh();
+                  } else {
+                    alert('Falha ao excluir matéria.');
+                    setIsModalOpen(false);
+                  }
+                }} 
+                style={{ background: '#ff4444', border: 'none', color: 'white', padding: 'var(--space-sm) var(--space-xl)', cursor: 'pointer', borderRadius: '4px', fontWeight: 600 }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   );
 }
