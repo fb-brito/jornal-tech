@@ -172,16 +172,17 @@ export default function ArticleContent({ article }: { article: any }) {
       </div>
 
       {isModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--color-surface)', padding: 'var(--space-2xl)', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center', border: '1px solid var(--color-rule)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-md)', fontSize: 'var(--text-lg)', color: 'var(--color-text)' }}>Excluir Matéria</h3>
-            <p style={{ color: 'var(--color-text-dim)', marginBottom: 'var(--space-2xl)' }}>Deseja realmente mover esta matéria para a lixeira?</p>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--color-paper)', padding: 'var(--space-2xl)', borderRadius: 'var(--radius-card)', maxWidth: '400px', width: '90%', textAlign: 'center', border: '1px solid var(--color-rule)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+            <h3 className="font-display text-xl" style={{ marginTop: 0, marginBottom: 'var(--space-md)', color: 'var(--color-ink)' }}>Excluir Matéria</h3>
+            <p className="text-md" style={{ color: 'var(--color-ink-2)', marginBottom: 'var(--space-2xl)' }}>Deseja realmente mover esta matéria para a lixeira?</p>
             <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center' }}>
               <button 
                 onClick={() => setIsModalOpen(false)} 
-                style={{ background: 'transparent', border: '1px solid var(--color-rule)', color: 'var(--color-text)', padding: 'var(--space-sm) var(--space-xl)', cursor: 'pointer', borderRadius: '4px', fontWeight: 600 }}
+                className="font-label text-sm"
+                style={{ flex: 1, background: 'transparent', border: '1px solid var(--color-rule)', color: 'var(--color-ink)', padding: 'var(--space-sm) var(--space-md)', cursor: 'pointer', transition: 'background 0.2s' }}
               >
-                Cancelar
+                CANCELAR
               </button>
               <button 
                 onClick={async () => {
@@ -198,9 +199,10 @@ export default function ArticleContent({ article }: { article: any }) {
                     setIsModalOpen(false);
                   }
                 }} 
-                style={{ background: '#ff4444', border: 'none', color: 'white', padding: 'var(--space-sm) var(--space-xl)', cursor: 'pointer', borderRadius: '4px', fontWeight: 600 }}
+                className="font-label text-sm bg-accent"
+                style={{ flex: 1, border: 'none', padding: 'var(--space-sm) var(--space-md)', cursor: 'pointer', transition: 'transform 0.2s' }}
               >
-                Confirmar
+                CONFIRMAR
               </button>
             </div>
           </div>
