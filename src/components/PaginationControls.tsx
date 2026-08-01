@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function PaginationControls({ 
   currentPage, 
@@ -13,6 +13,11 @@ export default function PaginationControls({
 }) {
   const router = useRouter();
   const [inputValue, setInputValue] = useState(currentPage.toString());
+
+  // Sincroniza a caixa de texto se a página for alterada através dos botões
+  useEffect(() => {
+    setInputValue(currentPage.toString());
+  }, [currentPage]);
 
   const handlePageSubmit = (e: React.FormEvent) => {
     e.preventDefault();
