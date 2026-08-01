@@ -38,49 +38,41 @@ export default function PaginationControls({
     setInputValue(num ? num.toString() : '');
   };
 
-  const buttonStyle = { 
-    padding: 'var(--space-xs) var(--space-md)', 
-    background: 'transparent',
-    border: '1px solid var(--color-rule)',
-    color: 'var(--color-ink)',
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-block'
-  };
-
-  const disabledStyle = {
-    ...buttonStyle,
-    opacity: 0.3,
-    cursor: 'not-allowed'
-  };
+  // Botões usam as classes btn-primary e estilos do botão "LER MATÉRIA COMPLETA"
+  const buttonClass = "btn-primary";
+  const disabledClass = "btn-primary";
+  
+  // O estilo inline só para ajustar o padding na paginação e o disabled
+  const buttonStyle = { padding: 'var(--space-xs) var(--space-md)' };
+  const disabledStyle = { padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' };
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-md)', marginTop: 'var(--space-2xl)' }}>
       {/* PRIMEIRA */}
       {currentPage > 1 ? (
-        <Link href={`/nossas-noticias?page=1`} className="font-label text-xs" style={buttonStyle}>
+        <Link href={`/nossas-noticias?page=1`} className={buttonClass} style={buttonStyle}>
           &lt;&lt; PRIMEIRA
         </Link>
       ) : (
-        <span className="font-label text-xs" style={disabledStyle}>
+        <span className={disabledClass} style={disabledStyle}>
           &lt;&lt; PRIMEIRA
         </span>
       )}
 
       {/* ANTERIOR */}
       {currentPage > 1 ? (
-        <Link href={`/nossas-noticias?page=${currentPage - 1}`} className="font-label text-xs" style={buttonStyle}>
+        <Link href={`/nossas-noticias?page=${currentPage - 1}`} className={buttonClass} style={buttonStyle}>
           &larr; ANTERIOR
         </Link>
       ) : (
-        <span className="font-label text-xs" style={disabledStyle}>
+        <span className={disabledClass} style={disabledStyle}>
           &larr; ANTERIOR
         </span>
       )}
 
       {/* INPUT */}
       <form onSubmit={handlePageSubmit} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-        <span className="font-label text-xs" style={{ color: 'var(--color-ink-2)' }}>PÁGINA</span>
+        <span className="font-label text-xs" style={{ color: '#ffffff', fontWeight: 'bold' }}>PÁGINA</span>
         <input 
           type="text" 
           value={inputValue}
@@ -90,33 +82,34 @@ export default function PaginationControls({
             width: '40px', 
             padding: 'var(--space-2xs)', 
             background: 'transparent', 
-            color: 'var(--color-ink)', 
+            color: '#ffffff', 
             border: '1px solid var(--color-rule)', 
             textAlign: 'center', 
-            fontFamily: 'var(--font-mono, monospace)' 
+            fontFamily: 'var(--font-mono, monospace)',
+            fontWeight: 'bold'
           }} 
         />
-        <span className="font-label text-xs" style={{ color: 'var(--color-ink-2)' }}>DE {totalPages}</span>
+        <span className="font-label text-xs" style={{ color: '#ffffff', fontWeight: 'bold' }}>DE {totalPages}</span>
       </form>
 
       {/* PRÓXIMA */}
       {currentPage < totalPages ? (
-        <Link href={`/nossas-noticias?page=${currentPage + 1}`} className="font-label text-xs" style={buttonStyle}>
+        <Link href={`/nossas-noticias?page=${currentPage + 1}`} className={buttonClass} style={buttonStyle}>
           PRÓXIMA &rarr;
         </Link>
       ) : (
-        <span className="font-label text-xs" style={disabledStyle}>
+        <span className={disabledClass} style={disabledStyle}>
           PRÓXIMA &rarr;
         </span>
       )}
 
       {/* ÚLTIMA */}
       {currentPage < totalPages ? (
-        <Link href={`/nossas-noticias?page=${totalPages}`} className="font-label text-xs" style={buttonStyle}>
+        <Link href={`/nossas-noticias?page=${totalPages}`} className={buttonClass} style={buttonStyle}>
           ÚLTIMA &gt;&gt;
         </Link>
       ) : (
-        <span className="font-label text-xs" style={disabledStyle}>
+        <span className={disabledClass} style={disabledStyle}>
           ÚLTIMA &gt;&gt;
         </span>
       )}
