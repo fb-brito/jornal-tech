@@ -1,6 +1,6 @@
 import { getDb } from '@/lib/db';
 import Link from 'next/link';
-
+import PaginationControls from '@/components/PaginationControls';
 export const dynamic = 'force-dynamic';
 
 export default async function NossasNoticias({
@@ -66,68 +66,7 @@ export default async function NossasNoticias({
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-3xl)', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-            
-            {/* PRIMEIRA */}
-            {safePage > 1 ? (
-              <Link href={`/nossas-noticias?page=1`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
-                {'<<'} PRIMEIRA
-              </Link>
-            ) : (
-              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
-                {'<<'} PRIMEIRA
-              </span>
-            )}
-
-            {/* ANTERIOR */}
-            {safePage > 1 ? (
-              <Link href={`/nossas-noticias?page=${safePage - 1}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
-                ← ANTERIOR
-              </Link>
-            ) : (
-              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
-                ← ANTERIOR
-              </span>
-            )}
-
-            {/* FORM DE NÚMERO */}
-            <form action="/nossas-noticias" method="GET" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', margin: '0 var(--space-sm)' }}>
-              <span className="font-label text-sm">PÁGINA</span>
-              <input 
-                type="number" 
-                name="page" 
-                defaultValue={safePage} 
-                min={1} 
-                max={totalPages} 
-                style={{ width: '60px', padding: 'var(--space-xs)', background: 'var(--color-bg)', color: 'var(--color-ink)', border: '1px solid var(--color-rule)', textAlign: 'center', fontFamily: 'var(--font-mono)' }} 
-              />
-              <span className="font-label text-sm">DE {totalPages}</span>
-              <button type="submit" style={{ display: 'none' }}>Ir</button>
-            </form>
-
-            {/* PRÓXIMA */}
-            {safePage < totalPages ? (
-              <Link href={`/nossas-noticias?page=${safePage + 1}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
-                PRÓXIMA →
-              </Link>
-            ) : (
-              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
-                PRÓXIMA →
-              </span>
-            )}
-
-            {/* ÚLTIMA */}
-            {safePage < totalPages ? (
-              <Link href={`/nossas-noticias?page=${totalPages}`} className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)' }}>
-                ÚLTIMA {'>>'}
-              </Link>
-            ) : (
-              <span className="btn-primary" style={{ padding: 'var(--space-xs) var(--space-md)', opacity: 0.5, cursor: 'not-allowed' }}>
-                ÚLTIMA {'>>'}
-              </span>
-            )}
-
-          </div>
+          <PaginationControls currentPage={safePage} totalPages={totalPages} />
         )}
       </section>
     </main>
