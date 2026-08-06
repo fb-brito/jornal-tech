@@ -203,7 +203,11 @@ export async function POST(req: Request) {
       title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
 
       try {
-        const zenrowsKey = process.env.ZENROWS_API_KEY || "7b8af0df96c106711cdf136cf39b1598a42436a8";
+        const zenrowsKey = process.env.ZENROWS_API_KEY;
+        if (!zenrowsKey) {
+           console.warn("Chave do ZenRows ausente nas variáveis de ambiente!");
+        }
+        
         const fetchUrl = `https://api.zenrows.com/v1/?apikey=${zenrowsKey}&url=${encodeURIComponent(url)}&premium_proxy=true`;
         const zrResponse = await fetch(fetchUrl);
         if (zrResponse.ok) {
