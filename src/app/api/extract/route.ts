@@ -185,19 +185,20 @@ export async function POST(req: Request) {
       desc = res.d;
     }
 
-    // VERIFICAÇÃO DE 404 (Página não encontrada / deletada)
+    // VERIFICAÇÃO DE 404 (Página não encontrada / deletada / Restrita ao App)
+    let is404 = false;
     if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
-      return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi deletada no Xiaohongshu.' }, { status: 404 });
+      is404 = true;
     }
 
     // CHECAGEM DE BLOQUEIO (Anti-Bot)
     let isBlocked = false;
-    if (!html || (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc)) {
+    if (!html || (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc && !is404)) {
       isBlocked = true;
     }
 
-    // TENTATIVA 2: FALLBACK ZENROWS
-    if (isBlocked) {
+    // TENTATIVA 2: FALLBACK ZENROWS (Apenas para bloqueios Web, pula se for 404)
+    if (isBlocked && !is404) {
       console.log("Acesso nativo bloqueado. Iniciando fallback ZenRows...");
       title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
 
@@ -210,23 +211,78 @@ export async function POST(req: Request) {
           const res = await tryExtract(html);
           title = res.t;
           desc = res.d;
-        } else {
-          await logError(url, "ZenRows Status", `HTTP ${zrResponse.status}`);
-          return NextResponse.json({ error: 'Acesso bloqueado pela rede social (Anti-Bot) e Fallback falhou.' }, { status: 403 });
+          isBlocked = false; // Reset se sucesso
         }
       } catch (e: any) {
-        await logError(url, "ZenRows Exception", e.message);
-        return NextResponse.json({ error: 'Erro no fallback de extração.' }, { status: 500 });
+        console.warn("ZenRows falhou:", e.message);
       }
 
-      // Verifica 404 novamente após fallback
+      // Re-avalia após ZenRows
       if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
-        return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi deletada no Xiaohongshu.' }, { status: 404 });
+        is404 = true;
+      } else if (!title || (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc && !is404) {
+        isBlocked = true;
+      }
+    }
+
+    // TENTATIVA 3: FALLBACK APIFY (APP Scraper para contornar "App-Only" ou falha total)
+    if (isBlocked || is404) {
+      console.log("Acionando Fallback Final (Apify) para postagem App-Only ou bloqueada...");
+      title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
+      
+      try {
+        const apifyToken = process.env.APIFY_API_TOKEN;
+        if (!apifyToken) {
+           console.warn("Chave do Apify ausente nas variáveis de ambiente!");
+        }
+        
+        // Utilizando o Actor popular de extração (All-in-One ou Search)
+        const apifyUrl = `https://api.apify.com/v2/acts/svGBZz6n79YbeA3uS/run-sync-get-dataset-items?token=${apifyToken}`;
+        
+        const apifyRes = await fetch(apifyUrl, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ startUrls: [{ url: url }] }),
+           // Importante: Timeout alto pois Apify pode demorar
+           signal: AbortSignal.timeout(25000)
+        });
+
+        if (apifyRes.ok) {
+           const dataset = await apifyRes.json();
+           const postData = dataset[0];
+           
+           if (postData && postData.title) {
+               title = postData.title;
+               desc = postData.desc || postData.content || "";
+               
+               if (postData.imageList && postData.imageList.length > 0) {
+                   for (const img of postData.imageList) {
+                       const imgUrl = img.url || img.urlDefault || img;
+                       if (typeof imgUrl === 'string') {
+                           const localPath = await downloadImage(imgUrl, id);
+                           if (localPath) images.push(localPath);
+                       }
+                   }
+                   if (images.length > 0) coverImage = images[0];
+               }
+               // Limpa os status de erro
+               isBlocked = false;
+               is404 = false;
+               console.log("Extração via Apify concluída com sucesso!");
+           }
+        } else {
+           console.warn("Apify falhou com status:", apifyRes.status);
+        }
+      } catch (e: any) {
+        console.warn("Erro no Apify:", e.message);
       }
 
-      // Checa bloqueio novamente após fallback
-      if (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc) {
-        return NextResponse.json({ error: 'Acesso bloqueado permanentemente (Anti-Bot), mesmo com Fallback.' }, { status: 403 });
+      // Validação final após todos os fallbacks
+      if (is404) {
+        return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi permanentemente deletada no Xiaohongshu.' }, { status: 404 });
+      }
+      if (isBlocked) {
+        return NextResponse.json({ error: 'Acesso bloqueado permanentemente (Anti-Bot). Todos os fallbacks falharam.' }, { status: 403 });
       }
     }
 
