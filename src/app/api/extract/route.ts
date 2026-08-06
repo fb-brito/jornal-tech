@@ -10,7 +10,7 @@ import { put } from '@vercel/blob';
 async function downloadImage(url: string, prefix: string): Promise<string> {
   if (!url) return "";
   if (url.startsWith('//')) url = 'http:' + url;
-  
+
   try {
     const res = await fetch(url, {
       headers: {
@@ -22,16 +22,16 @@ async function downloadImage(url: string, prefix: string): Promise<string> {
       await logError(url, "Download Image Status", `HTTP ${res.status}`);
       return "";
     }
-    
+
     const buffer = await res.arrayBuffer();
-    
+
     const ext = url.includes('webp') ? '.webp' : '.jpg';
     const filename = `jornal-tech/${prefix}_${crypto.randomBytes(4).toString('hex')}${ext}`;
-    
+
     const blob = await put(filename, Buffer.from(buffer), {
       access: 'public',
     });
-    
+
     return blob.url;
   } catch (e: any) {
     console.error("Error uploading image to Vercel Blob:", e);
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
         if (lastPart && lastPart.length > 5) {
           id = lastPart;
         }
-      } catch(e) { }
+      } catch (e) { }
     }
 
     // TRAVA DO ROOM
@@ -71,8 +71,8 @@ export async function POST(req: Request) {
         const roomSql = neon(process.env.ROOM_DATABASE_URL);
         const statusRes = await roomSql`SELECT is_running FROM system_status LIMIT 1`;
         if (statusRes.length > 0 && statusRes[0].is_running) {
-          return NextResponse.json({ 
-            error: 'O processamento em lote do Room está em execução. O banco está bloqueado temporariamente para segurança.' 
+          return NextResponse.json({
+            error: 'O processamento em lote do Room está em execução. O banco está bloqueado temporariamente para segurança.'
           }, { status: 423 });
         }
       } catch (err) {
@@ -86,36 +86,24 @@ export async function POST(req: Request) {
       const existing = await sql`SELECT status FROM articles WHERE id = ${id}`;
       if (existing.length > 0) {
         if (existing[0].status === 'deleted') {
-           await sql`
+          await sql`
              UPDATE articles 
              SET status = 'active', recycled_at = NOW(), recycle_count = recycle_count + 1 
              WHERE id = ${id}
            `;
-           return NextResponse.json({ success: true, id, recycled: true, message: 'Matéria recuperada da lixeira com sucesso!' });
+          return NextResponse.json({ success: true, id, recycled: true, message: 'Matéria recuperada da lixeira com sucesso!' });
         } else {
-           return NextResponse.json({ 
-             error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
-             existingId: id 
-           }, { status: 409 });
+          return NextResponse.json({
+            error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
+            existingId: id
+          }, { status: 409 });
         }
       }
-    } catch(dbErr) {
-       console.error("Falha ao consultar banco. Continuando fluxo de inserção otimista...", dbErr);
+    } catch (dbErr) {
+      console.error("Falha ao consultar banco. Continuando fluxo de inserção otimista...", dbErr);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
-
-    if (!response.ok) {
-      await logError(url, "Scraping Status", `HTTP ${response.status}`);
-      return NextResponse.json({ error: 'Falha ao acessar a URL' }, { status: response.status });
-    }
-
-    const html = await response.text();
-    const stateMatch = html.match(/window\.__INITIAL_STATE__=({.*?})<\/script>/);
+    let html = "";
     let title = "";
     let desc = "";
     let coverImage = "";
@@ -124,74 +112,121 @@ export async function POST(req: Request) {
     let modified_at: string | null = null;
     let source_metadata: string | null = null;
 
-    if (stateMatch) {
-      let stateStr = stateMatch[1];
-      stateStr = stateStr.replace(/undefined/g, 'null');
-      try {
-        const state = JSON.parse(stateStr);
-        const noteId = state?.note?.firstNoteId;
-        if (noteId) {
-          const noteDetail = state.note.noteDetailMap[noteId]?.note;
-          if (noteDetail) {
-             title = noteDetail.title || "";
-             desc = noteDetail.desc || "";
-             const type = noteDetail.type;
-             
-             if (noteDetail.time) published_at = new Date(noteDetail.time).toISOString();
-             if (noteDetail.lastUpdateTime) modified_at = new Date(noteDetail.lastUpdateTime).toISOString();
-             source_metadata = JSON.stringify(noteDetail);
+    // TENTATIVA 1: FETCH NATIVO
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+      });
+      if (response.ok) {
+        html = await response.text();
+      }
+    } catch (e) {
+      console.warn("Fetch nativo falhou:", e);
+    }
 
-             if (noteDetail.imageList && noteDetail.imageList.length > 0) {
-               if (type === 'video') {
-                 let rawUrl = noteDetail.imageList[0]?.urlDefault || "";
-                 if (rawUrl) {
-                   const localPath = await downloadImage(rawUrl, id);
-                   if (localPath) images.push(localPath);
-                 }
-               } else {
-                 for (const img of noteDetail.imageList) {
-                   let rawUrl = img.urlOriginal || img.urlDefault || "";
-                   if (rawUrl) {
-                     const localPath = await downloadImage(rawUrl, id);
-                     if (localPath) images.push(localPath);
-                   }
-                 }
-               }
-             }
-             if (images.length > 0) {
-               coverImage = images[0];
-             } else {
-                await logError(url, "Scraping Parsing", "Zero imagens extraídas da lista (talvez bloqueio do site)");
-             }
+    // Função auxiliar para tentar extrair dados do HTML
+    const tryExtract = async (sourceHtml: string) => {
+      let t = "", d = "";
+      const stateMatch = sourceHtml.match(/window\.__INITIAL_STATE__=({.*?})<\/script>/);
+      if (stateMatch) {
+        let stateStr = stateMatch[1].replace(/undefined/g, 'null');
+        try {
+          const state = JSON.parse(stateStr);
+          const noteId = state?.note?.firstNoteId;
+          if (noteId) {
+            const noteDetail = state.note.noteDetailMap[noteId]?.note;
+            if (noteDetail) {
+              t = noteDetail.title || "";
+              d = noteDetail.desc || "";
+              if (noteDetail.time) published_at = new Date(noteDetail.time).toISOString();
+              if (noteDetail.lastUpdateTime) modified_at = new Date(noteDetail.lastUpdateTime).toISOString();
+              source_metadata = JSON.stringify(noteDetail);
+
+              if (noteDetail.imageList && noteDetail.imageList.length > 0) {
+                const type = noteDetail.type;
+                if (type === 'video') {
+                  let rawUrl = noteDetail.imageList[0]?.urlDefault || "";
+                  if (rawUrl) {
+                    const localPath = await downloadImage(rawUrl, id);
+                    if (localPath) images.push(localPath);
+                  }
+                } else {
+                  for (const img of noteDetail.imageList) {
+                    let rawUrl = img.urlOriginal || img.urlDefault || "";
+                    if (rawUrl) {
+                      const localPath = await downloadImage(rawUrl, id);
+                      if (localPath) images.push(localPath);
+                    }
+                  }
+                }
+              }
+              if (images.length > 0) coverImage = images[0];
+            }
           }
+        } catch (e: any) {
+          console.error("Erro parse state:", e);
+        }
+      }
+      if (!t && !d) {
+        const $ = cheerio.load(sourceHtml);
+        t = $('title').text() || $('h1').first().text();
+        d = $('meta[name="description"]').attr('content') || $('p').first().text();
+      }
+      return { t, d };
+    };
+
+    if (html) {
+      const res = await tryExtract(html);
+      title = res.t;
+      desc = res.d;
+    }
+
+    // CHECAGEM DE BLOQUEIO (Anti-Bot)
+    let isBlocked = false;
+    if (!html || (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc)) {
+      isBlocked = true;
+    }
+
+    // TENTATIVA 2: FALLBACK ZENROWS
+    if (isBlocked) {
+      console.log("Acesso nativo bloqueado. Iniciando fallback ZenRows...");
+      title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
+
+      try {
+        const zenrowsKey = process.env.ZENROWS_API_KEY || "7b8af0df96c106711cdf136cf39b1598a42436a8";
+        const fetchUrl = `https://api.zenrows.com/v1/?apikey=${zenrowsKey}&url=${encodeURIComponent(url)}&premium_proxy=true`;
+        const zrResponse = await fetch(fetchUrl);
+        if (zrResponse.ok) {
+          html = await zrResponse.text();
+          const res = await tryExtract(html);
+          title = res.t;
+          desc = res.d;
         } else {
-          await logError(url, "Scraping Parsing", "noteId não encontrado no __INITIAL_STATE__");
+          await logError(url, "ZenRows Status", `HTTP ${zrResponse.status}`);
+          return NextResponse.json({ error: 'Acesso bloqueado pela rede social (Anti-Bot) e Fallback falhou.' }, { status: 403 });
         }
       } catch (e: any) {
-        console.error("Erro ao fazer parse do estado inicial:", e);
-        await logError(url, "Scraping Parse Exception", e.message);
+        await logError(url, "ZenRows Exception", e.message);
+        return NextResponse.json({ error: 'Erro no fallback de extração.' }, { status: 500 });
       }
-    } else {
-       await logError(url, "Scraping Parsing", "__INITIAL_STATE__ não encontrado no HTML (talvez a página tenha mudado de estrutura)");
-    }
 
-    if (!title && !desc) {
-      const $ = cheerio.load(html);
-      title = $('title').text() || $('h1').first().text();
-      desc = $('meta[name="description"]').attr('content') || $('p').first().text();
-    }
-
-    if (title && (title.includes('小红书') || title.includes('Xiaohongshu')) && !desc) {
-      return NextResponse.json({ error: 'Acesso bloqueado pela rede social (Anti-Bot). Não foi possível extrair a matéria.' }, { status: 403 });
+      // Checa bloqueio novamente após fallback
+      if (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc) {
+        return NextResponse.json({ error: 'Acesso bloqueado permanentemente (Anti-Bot), mesmo com Fallback.' }, { status: 403 });
+      }
     }
 
     const rawContent = `Title: ${title}\n\nDescription: ${desc}`;
     const apiKey = process.env.OPENROUTER_API_KEY;
 
     if (!apiKey) {
-      return NextResponse.json({ 
-        title, 
-        coverImage, 
+      return NextResponse.json({
+        title,
+        coverImage,
         markdown: `# ${title}\n\n${desc}\n\n*(Nota: Chave do OpenRouter não configurada. Conteúdo bruto exibido.)*`,
         rawContent
       });
@@ -247,8 +282,8 @@ export async function POST(req: Request) {
     }
 
     if (!finalMarkdown) {
-       finalMarkdown = `# ${title}\n\n${desc}\n\n*(Nota: Todos os modelos de IA falharam. Conteúdo bruto exibido.)*`;
-       await logError(url, "AI Processing", "Todos os modelos do OpenRouter falharam em retornar markdown.");
+      finalMarkdown = `# ${title}\n\n${desc}\n\n*(Nota: Todos os modelos de IA falharam. Conteúdo bruto exibido.)*`;
+      await logError(url, "AI Processing", "Todos os modelos do OpenRouter falharam em retornar markdown.");
     }
 
     let generatedTitle = title;
@@ -267,7 +302,7 @@ export async function POST(req: Request) {
 
     const newArticle = {
       id,
-      url, 
+      url,
       title: generatedTitle,
       description: generatedDesc,
       coverImage,
@@ -285,9 +320,9 @@ export async function POST(req: Request) {
     } catch (dbError: any) {
       // Inserção otimista: se bater na trava do banco (Chave Primária duplicada em transações paralelas rápidas)
       if (dbError.message?.includes('duplicate key') || dbError.code === '23505') {
-        return NextResponse.json({ 
+        return NextResponse.json({
           error: 'Oops! Esta matéria já foi extraída e cadastrada no sistema.',
-          existingId: id 
+          existingId: id
         }, { status: 409 });
       }
       throw dbError; // Repassa erro inesperado
