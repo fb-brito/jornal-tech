@@ -273,6 +273,11 @@ export async function POST(req: Request) {
                isBlocked = false;
                is404 = false;
                console.log("Extração via Apify concluída com sucesso!");
+           } else if (dataset && dataset.length === 0) {
+               console.warn("Apify retornou array vazio. Postagem protegida exigindo cookie.");
+               return NextResponse.json({ 
+                 error: 'Postagem App-Only protegida pelo Xiaohongshu. Para extrair, você precisa fornecer o link longo gerado no navegador contendo o "?xsec_token=".' 
+               }, { status: 403 });
            }
         } else {
            console.warn("Apify falhou com status:", apifyRes.status);
