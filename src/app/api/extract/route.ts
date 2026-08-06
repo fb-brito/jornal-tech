@@ -185,6 +185,11 @@ export async function POST(req: Request) {
       desc = res.d;
     }
 
+    // VERIFICAÇÃO DE 404 (Página não encontrada / deletada)
+    if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
+      return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi deletada no Xiaohongshu.' }, { status: 404 });
+    }
+
     // CHECAGEM DE BLOQUEIO (Anti-Bot)
     let isBlocked = false;
     if (!html || (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc)) {
@@ -212,6 +217,11 @@ export async function POST(req: Request) {
       } catch (e: any) {
         await logError(url, "ZenRows Exception", e.message);
         return NextResponse.json({ error: 'Erro no fallback de extração.' }, { status: 500 });
+      }
+
+      // Verifica 404 novamente após fallback
+      if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
+        return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi deletada no Xiaohongshu.' }, { status: 404 });
       }
 
       // Checa bloqueio novamente após fallback
