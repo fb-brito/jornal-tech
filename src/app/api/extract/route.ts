@@ -1,44 +1,10 @@
 import { NextResponse } from 'next/server';
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
-import * as cheerio from 'cheerio';
 import { neon } from '@neondatabase/serverless';
 import { getSql, insertArticle, logError } from '@/lib/db';
-import crypto from 'crypto';
-import { put } from '@vercel/blob';
-
-async function downloadImage(url: string, prefix: string): Promise<string> {
-  if (!url) return "";
-  if (url.startsWith('//')) url = 'http:' + url;
-
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.xiaohongshu.com/'
-      }
-    });
-    if (!res.ok) {
-      await logError(url, "Download Image Status", `HTTP ${res.status}`);
-      return "";
-    }
-
-    const buffer = await res.arrayBuffer();
-
-    const ext = url.includes('webp') ? '.webp' : '.jpg';
-    const filename = `jornal-tech/${prefix}_${crypto.randomBytes(4).toString('hex')}${ext}`;
-
-    const blob = await put(filename, Buffer.from(buffer), {
-      access: 'public',
-    });
-
-    return blob.url;
-  } catch (e: any) {
-    console.error("Error uploading image to Vercel Blob:", e);
-    await logError(url, "Download Image Exception", e.message);
-    return "";
-  }
-}
+import { orchestrateExtraction } from '@/lib/services/extractionOrchestrator';
+import { processAiMarkdown } from '@/lib/services/aiService';
 
 export async function POST(req: Request) {
   let requestUrl = "";
@@ -103,291 +69,47 @@ export async function POST(req: Request) {
       console.error("Falha ao consultar banco. Continuando fluxo de inserção otimista...", dbErr);
     }
 
-    let html = "";
-    let title = "";
-    let desc = "";
-    let coverImage = "";
-    let images: string[] = [];
-    let published_at: string | null = null;
-    let modified_at: string | null = null;
-    let source_metadata: string | null = null;
-
-    // TENTATIVA 1: FETCH NATIVO
+    // ----------------------------------------------------
+    // ORQUESTRAÇÃO DE EXTRAÇÃO (NATIVE -> ZENROWS -> APIFY)
+    // ----------------------------------------------------
+    let extraction;
     try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
-      });
-      if (response.ok) {
-        html = await response.text();
+      extraction = await orchestrateExtraction(url, id);
+    } catch (error: any) {
+      if (error.message === "GATED_CONTENT") {
+        return NextResponse.json({ 
+          error: 'Postagem App-Only protegida pelo Xiaohongshu. Para extrair, você precisa fornecer o link longo gerado no navegador contendo o "?xsec_token=".' 
+        }, { status: 403 });
       }
-    } catch (e) {
-      console.warn("Fetch nativo falhou:", e);
+      throw error;
     }
 
-    // Função auxiliar para tentar extrair dados do HTML
-    const tryExtract = async (sourceHtml: string) => {
-      let t = "", d = "";
-      const stateMatch = sourceHtml.match(/window\.__INITIAL_STATE__=({.*?})<\/script>/);
-      if (stateMatch) {
-        let stateStr = stateMatch[1].replace(/undefined/g, 'null');
-        try {
-          const state = JSON.parse(stateStr);
-          const noteId = state?.note?.firstNoteId;
-          if (noteId) {
-            const noteDetail = state.note.noteDetailMap[noteId]?.note;
-            if (noteDetail) {
-              t = noteDetail.title || "";
-              d = noteDetail.desc || "";
-              if (noteDetail.time) published_at = new Date(noteDetail.time).toISOString();
-              if (noteDetail.lastUpdateTime) modified_at = new Date(noteDetail.lastUpdateTime).toISOString();
-              source_metadata = JSON.stringify(noteDetail);
-
-              if (noteDetail.imageList && noteDetail.imageList.length > 0) {
-                const type = noteDetail.type;
-                if (type === 'video') {
-                  let rawUrl = noteDetail.imageList[0]?.urlDefault || "";
-                  if (rawUrl) {
-                    const localPath = await downloadImage(rawUrl, id);
-                    if (localPath) images.push(localPath);
-                  }
-                } else {
-                  for (const img of noteDetail.imageList) {
-                    let rawUrl = img.urlOriginal || img.urlDefault || "";
-                    if (rawUrl) {
-                      const localPath = await downloadImage(rawUrl, id);
-                      if (localPath) images.push(localPath);
-                    }
-                  }
-                }
-              }
-              if (images.length > 0) coverImage = images[0];
-            }
-          }
-        } catch (e: any) {
-          console.error("Erro parse state:", e);
-        }
-      }
-      if (!t && !d) {
-        const $ = cheerio.load(sourceHtml);
-        t = $('title').text() || $('h1').first().text();
-        d = $('meta[name="description"]').attr('content') || $('p').first().text();
-      }
-      return { t, d };
-    };
-
-    if (html) {
-      const res = await tryExtract(html);
-      title = res.t;
-      desc = res.d;
+    // Validação de Erros Finais
+    if (extraction.is404) {
+      return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi permanentemente deletada no Xiaohongshu.' }, { status: 404 });
+    }
+    if (extraction.isBlocked) {
+      return NextResponse.json({ error: 'Acesso bloqueado permanentemente (Anti-Bot). Todos os fallbacks falharam.' }, { status: 403 });
     }
 
-    // VERIFICAÇÃO DE 404 (Página não encontrada / deletada / Restrita ao App)
-    let is404 = false;
-    if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
-      is404 = true;
-    }
-
-    // CHECAGEM DE BLOQUEIO (Anti-Bot)
-    let isBlocked = false;
-    if (!html || (title && (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc && !is404)) {
-      isBlocked = true;
-    }
-
-    // TENTATIVA 2: FALLBACK ZENROWS (Apenas para bloqueios Web, pula se for 404)
-    if (isBlocked && !is404) {
-      console.log("Acesso nativo bloqueado. Iniciando fallback ZenRows...");
-      title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
-
-      try {
-        const zenrowsKey = process.env.ZENROWS_API_KEY;
-        if (!zenrowsKey) {
-           console.warn("Chave do ZenRows ausente nas variáveis de ambiente!");
-        }
-        
-        const fetchUrl = `https://api.zenrows.com/v1/?apikey=${zenrowsKey}&url=${encodeURIComponent(url)}&premium_proxy=true`;
-        const zrResponse = await fetch(fetchUrl);
-        if (zrResponse.ok) {
-          html = await zrResponse.text();
-          const res = await tryExtract(html);
-          title = res.t;
-          desc = res.d;
-          isBlocked = false; // Reset se sucesso
-        }
-      } catch (e: any) {
-        console.warn("ZenRows falhou:", e.message);
-      }
-
-      // Re-avalia após ZenRows
-      if (title && (title.includes('你访问的页面不见了') || title.includes('页面不见了'))) {
-        is404 = true;
-      } else if (!title || (title.includes('小红书') || title.includes('Xiaohongshu') || title.includes('安全限制')) && !desc && !is404) {
-        isBlocked = true;
-      }
-    }
-
-    // TENTATIVA 3: FALLBACK APIFY (APP Scraper para contornar "App-Only" ou falha total)
-    if (isBlocked || is404) {
-      console.log("Acionando Fallback Final (Apify) para postagem App-Only ou bloqueada...");
-      title = ""; desc = ""; images = []; coverImage = ""; published_at = null; modified_at = null; source_metadata = null;
-      
-      try {
-        const apifyToken = process.env.APIFY_API_TOKEN;
-        if (!apifyToken) {
-           console.warn("Chave do Apify ausente nas variáveis de ambiente!");
-        }
-        
-        // Utilizando o Actor popular de extração (All-in-One ou Search)
-        const apifyUrl = `https://api.apify.com/v2/acts/svGBZz6n79YbeA3uS/run-sync-get-dataset-items?token=${apifyToken}`;
-        
-        const apifyRes = await fetch(apifyUrl, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ startUrls: [{ url: url }] }),
-           // Importante: Timeout alto pois Apify pode demorar
-           signal: AbortSignal.timeout(25000)
-        });
-
-        if (apifyRes.ok) {
-           const dataset = await apifyRes.json();
-           const postData = dataset[0];
-           
-           if (postData && postData.title) {
-               title = postData.title;
-               desc = postData.desc || postData.content || "";
-               
-               if (postData.imageList && postData.imageList.length > 0) {
-                   for (const img of postData.imageList) {
-                       const imgUrl = img.url || img.urlDefault || img;
-                       if (typeof imgUrl === 'string') {
-                           const localPath = await downloadImage(imgUrl, id);
-                           if (localPath) images.push(localPath);
-                       }
-                   }
-                   if (images.length > 0) coverImage = images[0];
-               }
-               // Limpa os status de erro
-               isBlocked = false;
-               is404 = false;
-               console.log("Extração via Apify concluída com sucesso!");
-           } else if (dataset && dataset.length === 0) {
-               console.warn("Apify retornou array vazio. Postagem protegida exigindo cookie.");
-               return NextResponse.json({ 
-                 error: 'Postagem App-Only protegida pelo Xiaohongshu. Para extrair, você precisa fornecer o link longo gerado no navegador contendo o "?xsec_token=".' 
-               }, { status: 403 });
-           }
-        } else {
-           console.warn("Apify falhou com status:", apifyRes.status);
-        }
-      } catch (e: any) {
-        console.warn("Erro no Apify:", e.message);
-      }
-
-      // Validação final após todos os fallbacks
-      if (is404) {
-        return NextResponse.json({ error: 'Matéria não encontrada. O link é inválido ou a postagem foi permanentemente deletada no Xiaohongshu.' }, { status: 404 });
-      }
-      if (isBlocked) {
-        return NextResponse.json({ error: 'Acesso bloqueado permanentemente (Anti-Bot). Todos os fallbacks falharam.' }, { status: 403 });
-      }
-    }
-
-    const rawContent = `Title: ${title}\n\nDescription: ${desc}`;
-    const apiKey = process.env.OPENROUTER_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json({
-        title,
-        coverImage,
-        markdown: `# ${title}\n\n${desc}\n\n*(Nota: Chave do OpenRouter não configurada. Conteúdo bruto exibido.)*`,
-        rawContent
-      });
-    }
-
-    let finalMarkdown = "";
-    const OPENROUTER_MODELS = [
-      "google/gemma-4-26b-a4b-it:free",
-      "poolside/laguna-xs-2.1:free",
-      "openai/gpt-oss-20b:free",
-      "openrouter/free"
-    ];
-
-    for (const model of OPENROUTER_MODELS) {
-      try {
-        const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [
-              {
-                role: "system",
-                content: "Você é um Tradutor e Formatador Estrito. Seu objetivo é pegar o título e a descrição originais e transformá-los em um artigo formatado em Markdown. REGRAS OBRIGATÓRIAS:\n1. Escreva INTEIRAMENTE em Português do Brasil (PT-BR).\n2. O título que você gerar (linha que começa com #) DEVE ser a tradução fiel do título original, adaptado para o português fluído, sem inventar contexto extra.\n3. NUNCA converse com o usuário. NÃO inclua meta-comentários como 'Aqui está a matéria', 'Como você forneceu um texto curto', etc. Retorne EXCLUSIVAMENTE o conteúdo em Markdown.\n4. Se o texto original for extremamente curto, crie uma matéria curta e direta. NUNCA invente informações não presentes no texto original (ex: não comece a explicar o que é a rede social ou o histórico da empresa se isso não foi fornecido).\n5. NUNCA traduza nomes de projetos, tecnologias, ou marcas (ex: 'OpenCut', 'hallmark', 'GitHub').\n6. Inclua 1 diagrama `mermaid` APENAS se o contexto permitir ilustrar um processo. Se o texto for apenas uma frase de humor ou observação curta, NÃO insira diagrama."
-              },
-              {
-                role: "user",
-                content: `Traduza e formate o seguinte conteúdo estritamente para Markdown.\n\nTítulo Original: ${title}\nDescrição Original: ${desc}`
-              }
-            ]
-          }),
-        });
-
-        if (aiResponse.ok) {
-          const aiData = await aiResponse.json();
-          if (aiData.choices && aiData.choices.length > 0) {
-            finalMarkdown = aiData.choices[0].message.content;
-            console.log(`Sucesso com o modelo: ${model}`);
-            break;
-          }
-        } else {
-          console.error(`Erro com o modelo ${model}: ${aiResponse.status}`);
-          const errTxt = await aiResponse.text();
-          await logError(url, `AI Fetch Status (${model})`, `HTTP ${aiResponse.status}`, errTxt);
-        }
-      } catch (error: any) {
-        console.error(`Falha ao tentar o modelo ${model}:`, error);
-        await logError(url, `AI Fetch Exception (${model})`, error.message);
-      }
-    }
-
-    if (!finalMarkdown) {
-      finalMarkdown = `# ${title}\n\n${desc}\n\n*(Nota: Todos os modelos de IA falharam. Conteúdo bruto exibido.)*`;
-      await logError(url, "AI Processing", "Todos os modelos do OpenRouter falharam em retornar markdown.");
-    }
-
-    let generatedTitle = title;
-    let generatedDesc = desc;
-
-    const lines = finalMarkdown.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const titleLine = lines.find(l => l.startsWith('# '));
-    if (titleLine) {
-      generatedTitle = titleLine.replace(/^#\s*/, '').replace(/\*\*/g, '');
-    }
-
-    const descLine = lines.find(l => l.length > 30 && !l.startsWith('#') && !l.startsWith('!') && !l.startsWith('-') && !l.startsWith('>'));
-    if (descLine) {
-      generatedDesc = descLine.slice(0, 160) + (descLine.length > 160 ? '...' : '');
-    }
+    // ----------------------------------------------------
+    // PROCESSAMENTO IA (MARKDOWN) E SALVAMENTO
+    // ----------------------------------------------------
+    const aiResult = await processAiMarkdown(url, extraction.title, extraction.desc);
 
     const newArticle = {
       id,
       url,
-      title: generatedTitle,
-      description: generatedDesc,
-      coverImage,
-      images,
-      markdown: finalMarkdown,
-      rawContent,
+      title: aiResult.generatedTitle,
+      description: aiResult.generatedDesc,
+      coverImage: extraction.coverImage,
+      images: extraction.images,
+      markdown: aiResult.finalMarkdown,
+      rawContent: aiResult.rawContent,
       status: 'active',
-      source_metadata,
-      published_at,
-      modified_at
+      source_metadata: extraction.source_metadata,
+      published_at: extraction.published_at,
+      modified_at: extraction.modified_at
     };
 
     try {
